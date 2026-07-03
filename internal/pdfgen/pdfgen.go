@@ -3,10 +3,11 @@ package pdfgen
 import (
 	"bytes"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 
 	"github.com/johnfercher/maroto/v2"
-	"github.com/johnfercher/maroto/v2/pkg/components/col"
 	"github.com/johnfercher/maroto/v2/pkg/components/text"
 	"github.com/johnfercher/maroto/v2/pkg/config"
 	"github.com/johnfercher/maroto/v2/pkg/consts/align"
@@ -19,7 +20,33 @@ import (
 const (
 	fontSize       = 9.0
 	lineNumberSize = 8.0
+	gridSize       = 100
+	lineNumberGap  = 2.0 // mm between the line number and the code
+
+	pageWidthMM    = 210.0 // A4
+	marginMM       = 10.0
+	contentWidthMM = pageWidthMM - 2*marginMM
+	mmPerGridUnit  = contentWidthMM / gridSize
+
+	// courierGlyphRatio is the fixed advance width of the standard PDF
+	// Courier font, expressed as a fraction of its point size (600/1000 em).
+	courierGlyphRatio = 0.6
+	mmPerPoint        = 25.4 / 72
 )
+
+// lineNumberColumns sizes the line-number grid column to exactly fit the
+// widest line number in the document (plus lineNumberGap), so the leading
+// digit of the longest number lands flush at the left margin, aligned with
+// the header text.
+func lineNumberColumns(totalLines int) int {
+	digits := len(strconv.Itoa(totalLines))
+	digitWidthMM := float64(digits) * lineNumberSize * courierGlyphRatio * mmPerPoint
+	cols := int(math.Ceil((digitWidthMM + lineNumberGap) / mmPerGridUnit))
+	if cols < 1 {
+		cols = 1
+	}
+	return cols
+}
 
 // Header groups the metadata printed at the top of every page.
 type Header struct {
@@ -38,6 +65,7 @@ func Generate(body string, header Header) ([]byte, error) {
 		WithTopMargin(10).
 		WithRightMargin(10).
 		WithBottomMargin(10).
+		WithMaxGridSize(gridSize).
 		WithPageNumber(props.PageNumber{
 			Pattern: "Page {current} / {total}",
 			Place:   props.RightTop,
@@ -64,15 +92,19 @@ func Generate(body string, header Header) ([]byte, error) {
 		return nil, fmt.Errorf("register pdf header: %w", err)
 	}
 
-	for i, line := range parseCode(body) {
+	lines := parseCode(body)
+	lineNumberCols := lineNumberColumns(len(lines))
+	codeCols := gridSize - lineNumberCols
+
+	for i, line := range lines {
 		m.AddAutoRow(
-			text.NewCol(1, fmt.Sprintf("%d", i+1), props.Text{
+			text.NewCol(lineNumberCols, fmt.Sprintf("%d", i+1), props.Text{
 				Size:   lineNumberSize,
 				Family: fontfamily.Courier,
 				Align:  align.Right,
+				Right:  lineNumberGap,
 			}),
-			col.New(1),
-			text.NewCol(10, line, props.Text{
+			text.NewCol(codeCols, line, props.Text{
 				Size:   fontSize,
 				Family: fontfamily.Courier,
 				Align:  align.Left,
