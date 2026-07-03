@@ -12,9 +12,8 @@ RUN CGO_ENABLED=0 go build -o /out/printing-master .
 
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates
-
 WORKDIR /app
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /out/printing-master ./printing-master
 
 ENV PORT=8080
